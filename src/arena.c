@@ -1,62 +1,104 @@
 #include "./arena.h"
+#include "except.h"
 #include "utils.h"
-#include <stdint.h>
+#include <assert.h>
+#include <string.h>
 
-void memory_system_init(ArenaManager *manager){
-    manager->free_arenas = NULL;
-    manager->active_arenas = NULL;
-    manager->arena_size = DEFAULT_ARENA_SIZE;
+#define THRESHOLD 10
+
+#define T Arena_T
+
+struct T {
+    T prev;              // Points to the head of the chunk   
+    uint8 *avail;        // points to the first available byte
+    uint8 *limit;        // points to the just after the last avaiable byte
+
+};
+
+union align {
+    int i;
+    long l;
+    long *lp;
+    void *p;
+    void (*fp)(void);
+    float f;
+    double d;
+    long double ld;
+};
+
+union header {
+    struct T b;
+    union align a;
+};
+
+static T freechunks;
+static int nfree;
+
+const Except_T Arena_NewFailed = {"Arena Creation Failed"};
+const Except_T Arena_Failed = {"Arena Allocation Failed"};
+
+T Arena_new(void){
+    T arena = malloc(sizeof(*arena));
+    if(arena == NULL)
+        RAISE(Arena_NewFailed);
+    arena->prev = NULL;
+    arena->limit = arena->avail = NULL;
+    return arena;
 }
-void arena_init(Arena *arena, size_t size){
-    arena->offset = 0;
-    arena->capacity = 0;
-    arena->next = NULL;
-    arena->data = malloc(size >= DEFAULT_ARENA_SIZE ? size : DEFAULT_ARENA_SIZE);
+
+void Arena_dispose(Arena_T *ap){
+    assert(ap && *ap);
+    Arena_free(*ap);    // This deallocates the memory block
+    free(*ap);          // This deallocates the Arena_T object
+    *ap = NULL;
 }
 
+void *Arena_alloc(T arena, uint64 nbytes,
+        const char *file, int line){
 
-bool can_allocate_from_arena(Arena *arena, size_t size, size_t align){
-    // we need to first align the offset pointer
-    uintptr_t base = (uintptr_t)(arena->data + arena->offset);
-    uintptr_t aligned = (base + (align - 1)) & ~(uintptr_t)(align - 1);
-    return (aligned - base) + size >= arena->capacity;
-}
+    assert(arena);
+    assert(nbytes > 0);
 
-Arena* get_arena(ArenaManager *manager, size_t size, size_t align){
-   if(manager->active_arenas && can_allocate_from_arena(
-    manager->active_arenas, size, align
-   )) return manager->active_arenas;
-   
-   // we dont have any suitable arenas in the active arenas
-   // we check in the free_arenas
-   Arena **prev = &manager->free_arenas;
-   Arena *arena = NULL;
-    
-   while(*prev){
-    if(can_allocate_from_arena(*prev, size, align)){
-        arena = *prev;
-        arena->next = NULL;
-        *prev = (*prev)->next;
-        return arena;
+    nbytes = ((nbytes + sizeof(union align) - 1)/
+            (sizeof(union align)))*(sizeof(union align));
+    while(nbytes > arena->limit - arena->avail){
+        T ptr;
+        uint8 *limit;
+        //
+        *ptr = *arena;
+        arena->avail = (uint8 *)((union header *)ptr + 1);
+        arena->limit = limit;
+        arena->prev = ptr;
     }
-    prev = &(*prev)->next; 
-   }
-   
-   // we couldn't find any suitable arena in the free arenas
-   // we shoulf allocate a new one
-   arena = malloc(sizeof(Arena));
-   arena_init(arena, size);
-   return arena;
+    arena->avail  += nbytes;
+    return arena->avail - nbytes;
 }
 
-void *alloc(ArenaManager *manager, size_t size, size_t align){
-    Arena *arena = get_arena(manager, size, align);
-    manager->active_arenas = arena;
+void *Arena_calloc(T arena, uint64 count, uint64 nbytes,
+        const char *file, int line){
+    void *ptr;
     
-    // the arena that we have will have enough space required for the allocation
-    // we first need to align the offset according to the align parameter
-    uintptr_t base = (uintptr_t)(arena->data + arena->offset);
-    uintptr_t aligned = (base + align - 1) & ~(uintptr_t)(align - 1); 
-    arena->offset = (aligned - base) + size;
-    return (uint8 *)aligned; 
+    assert(count > 0);
+    ptr = Arena_alloc(arena, count*nbytes, file, line);
+    memset(ptr, '\0', count*nbytes);
+    return ptr;
 }
+
+void Arena_free(T arena){
+    assert(arena);
+    while(arena->prev){
+        struct T tmp = *arena->prev;
+        if(nfree < THRESHOLD){
+            arena->prev->prev = freechunks;
+            freechunks = arena->prev;
+            nfree++;
+            freechunks->limit = arena->limit;
+        } else
+            free(arena->prev);
+        *arena = tmp;
+    }
+    assert(arena->limit == NULL);
+    assert(arena->avail == NULL);
+}
+
+#undef T

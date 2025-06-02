@@ -1,30 +1,25 @@
-#ifndef __ARENA__H__
-#define __ARENA__H__
+#ifndef __ARENA_H__
+#define __ARENA_H__
 
+#include "except.h"
 #include "utils.h"
-#include <pthread.h>
 
-#define DEFAULT_ARENA_SIZE (1 << 12)    // 4 KB
+#define T Arena_T
+typedef struct T *T;
 
-typedef struct Arena Arena;
-typedef struct ArenaManager ArenaManager;
+extern const Except_T Arena_NewFailed;
+extern const Except_T Arena_Failed;
+
+// exported functions
+extern T Arena_new(void);
+extern void Arena_dispose(T *ap);
+
+extern void *Arena_alloc(T arena, uint64 nbytes,
+        const char *file, int line);
+extern void *Arena_calloc(T arena, uint64 count, uint64 nbytes,
+        const char *file, int line);
+extern void Arena_free(T arena);
 
 
-struct Arena {
-    size_t offset;
-    size_t capacity;
-    uint8 *data;
-    Arena *next;
-};
-
-struct ArenaManager {
-    Arena *free_arenas;
-    Arena *active_arenas;
-    size_t arena_size;
-};
-
-void memory_system_init(ArenaManager *manager);
-void arena_init(Arena* arena, size_t arena_size);
-void *alloc(ArenaManager* manager, size_t size, size_t align);
-
+#undef T
 #endif

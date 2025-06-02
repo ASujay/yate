@@ -1,10 +1,17 @@
-#include "arena.h"
+#include "stack.h"
 #include <stdio.h>
+#include "arena.h"
 
-int main(int argc, char **argv){
-    ArenaManager* manager = malloc(sizeof(ArenaManager));
-    memory_system_init(manager);
-    int *ptr = alloc(manager, sizeof(int *), sizeof(int *));
-    *ptr = 2;
-    printf("Memory slot: %p\nValue: %d\n", ptr, *ptr);    
+
+int main(void){
+    int arr[] = {1, 2, 3, 4, 5, 6};
+    Stack_T stk = Stack_new();
+    for(int i = 0; i < 6; i++){
+        Stack_push(stk, &arr[i]);
+    }
+
+    while(!Stack_empty(stk)){
+        void *val = Stack_pop(stk);
+        printf("%d\n", *((int *)val));
+    }
 }
